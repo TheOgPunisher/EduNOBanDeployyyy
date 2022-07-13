@@ -3,12 +3,13 @@ from bot import DOWNLOAD_DIR
 
 
 class UploadStatus:
-    def __init__(self, obj, size, gid, listener):
+    def __init__(self, obj, size, gid, listener, time):
         self.__obj = obj
         self.__size = size
         self.__uid = listener.uid
         self.__gid = gid
         self.message = listener.message
+        self.time = time
 
     def path(self):
         return f"{DOWNLOAD_DIR}{self.__uid}"
@@ -52,6 +53,12 @@ class UploadStatus:
             return f'{get_readable_time(seconds)}'
         except ZeroDivisionError:
             return '-'
+        
+    def elapsed(self):
+        try:
+            return f"{get_readable_time(time() - self.time)}"
+        except Exception:
+            return '-'      
 
     def gid(self) -> str:
         return self.__gid
