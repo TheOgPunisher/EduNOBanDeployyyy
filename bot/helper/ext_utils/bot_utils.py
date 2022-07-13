@@ -125,7 +125,14 @@ def get_progress_bar_string(status):
 
 def get_readable_message():
     with download_dict_lock:
-        msg = ""
+        num_active = 0
+        num_all = 0
+        for stats in list(download_dict.values()):
+            if stats.status() not in [MirrorStatus.STATUS_WAITING, MirrorStatus.STATUS_FAILED, MirrorStatus.STATUS_PAUSE, MirrorStatus.STATUS_CHECKING]:
+                num_active += 1
+            num_all += 1
+        msg = f'<b><i><u>Bot Of {CHAT_NAME}</u></i></b>\n\n'
+        msg += f"<b><i>Active: {num_active}/{num_all}</i></b>\n\n"
         if STATUS_LIMIT is not None:
             tasks = len(download_dict)
             global pages
@@ -134,8 +141,7 @@ def get_readable_message():
                 globals()['COUNT'] -= STATUS_LIMIT
                 globals()['PAGE_NO'] -= 1
         for index, download in enumerate(list(download_dict.values())[COUNT:], start=1):
-            msg += f"<b>Name:</b> <code>{escape(str(download.name()))}</code>"
-            msg += f"\n<b>Status:</b> <i>{download.status()}</i>"
+            msg += f"<b>{download.status()}:</b> <code>{escape(str(download.name()))}</code>"
             if download.status() not in [
                 MirrorStatus.STATUS_ARCHIVING,
                 MirrorStatus.STATUS_EXTRACTING,
@@ -158,19 +164,22 @@ def get_readable_message():
                 try:
                     msg += f"\n<b>Seeders:</b> {download.torrent_info().num_seeds}" \
                            f" | <b>Leechers:</b> {download.torrent_info().num_leechs}"
-                except:
+                 except Exception:
                     pass
-                msg += f'\n<b>User:</b> ️<code>{download.message.from_user.first_name}</code>️(<code>{download.message.from_user.id}</code>)'
-                msg += f"\n<b>To Stop:</b><code>/{BotCommands.CancelMirror} {download.gid()}</code>"
+                msg += f'\n<b>Adder:</b> {download.message.from_user.first_name} (<code>{download.message.from_user.id}</code>)'
+                msg += f"\n<code>/{BotCommands.CancelMirror[0]} {download.gid()}</code>"
             elif download.status() == MirrorStatus.STATUS_SEEDING:
                 msg += f"\n<b>Size: </b>{download.size()}"
+                msg += f"\n<b>Elapsed Time:</b> {download.elapsed()}" 
                 msg += f"\n<b>Speed: </b>{get_readable_file_size(download.torrent_info().upspeed)}/s"
                 msg += f" | <b>Uploaded: </b>{get_readable_file_size(download.torrent_info().uploaded)}"
                 msg += f"\n<b>Ratio: </b>{round(download.torrent_info().ratio, 3)}"
                 msg += f" | <b>Time: </b>{get_readable_time(download.torrent_info().seeding_time)}"
-                msg += f"\n<code>/{BotCommands.CancelMirror} {download.gid()}</code>"
+                msg += f'\n<b>Adder:</b> {download.message.from_user.first_name} (<code>{download.message.from_user.id}</code>)'
+                msg += f"\n<code>/{BotCommands.CancelMirror[0]} {download.gid()}</code>"
             else:
                 msg += f"\n<b>Size: </b>{download.size()}"
+                msg += f"\n<b>Elapsed Time:</b> {download.elapsed()}"
             msg += "\n\n"
             if STATUS_LIMIT is not None and index == STATUS_LIMIT:
                 break
@@ -192,14 +201,14 @@ def get_readable_message():
                 elif 'MB/s' in spd:
                     upspeed_bytes += float(spd.split('M')[0]) * 1048576
         bmsg += f"\n<b>DL:</b> {get_readable_file_size(dlspeed_bytes)}/s | <b>UL:</b> {get_readable_file_size(upspeed_bytes)}/s"
+        buttons = ButtonMaker()
         if STATUS_LIMIT is not None and tasks > STATUS_LIMIT:
-            msg += f"<b>Page:</b> {PAGE_NO}/{pages} | <b>Tasks:</b> {tasks}\n"
-            buttons = ButtonMaker()
             buttons.sbutton("Previous", "status pre")
+            buttons.sbutton(f"{PAGE_NO}/{pages}", "ex refresh")
             buttons.sbutton("Next", "status nex")
-            button = InlineKeyboardMarkup(buttons.build_menu(2))
-            return msg + bmsg, button
-        return msg + bmsg, ""
+        buttons.sbutton("Close", "ex close")
+        button = InlineKeyboardMarkup(buttons.build_menu(3))
+        return msg + bmsg, button
 
 def turn(data):
     try:
@@ -220,7 +229,7 @@ def turn(data):
                     COUNT -= STATUS_LIMIT
                     PAGE_NO -= 1
         return True
-    except:
+    except Exception:
         return False
 
 def get_readable_time(seconds: int) -> str:
@@ -287,60 +296,170 @@ def get_content_type(link: str) -> str:
     try:
         res = rhead(link, allow_redirects=True, timeout=5, headers = {'user-agent': 'Wget/1.12'})
         content_type = res.headers.get('content-type')
-    except:
+    except Exception:
         try:
             res = urlopen(link, timeout=5)
             info = res.info()
             content_type = info.get_content_type()
-        except:
+        except Exception:
             content_type = None
     return content_type
 
-ONE, TWO, THREE = range(3)
-def pop_up_stats(update, context):
+def CheckAdmin(message, user_id: int):
+    msg = message
+    if msg.chat.type == "private" \
+        or user_id in [OWNER_ID] \
+        or user_id in SUDO_USERS \
+        or bot.get_chat_member(msg.chat.id, msg.from_user.id).status in ['creator', 'administrator'] \
+        or user_id == 1087968824 \
+        or (msg.reply_to_message and msg.reply_to_message.sender_chat is not None and msg.reply_to_message.sender_chat.type != "channel"):
+        return True
+    
+
+def CheckUser(message, user_id: int):
+    admins = bool(CheckAdmin(message, user_id))
+    reply_to = message.reply_to_message
+    try:
+        if not FSUB_CHNL:
+            return True
+        if not admins:
+            user = dispatcher.bot.getChatMember(chat_id=f'{FSUB_CHNL}', user_id=user_id)
+            if user.status == 'member' or user.status not in ['left', 'kicked']:
+                return True
+            elif user.status == 'left':
+                LOGGER.info("User is Not Member")
+                Fsub= message_utils.sendFsub(bot, message)
+                Thread(target=message_utils.auto_delete_message, args=(bot, message, Fsub)).start() 
+                if reply_to is not None:
+                    reply_to.delete()       
+                return False
+            else:
+                LOGGER.info("User Banned")
+                Fsub= message_utils.sendMessage("You Are Banned For Using Me", bot, message)
+                Thread(target=message_utils.auto_delete_message, args=(bot, message, Fsub)).start()  
+                if reply_to is not None:
+                    reply_to.delete()    
+                return False       
+    except (Unauthorized, BadRequest) as e:
+            LOGGER.error(str(e))
+            return True
+        
+def CheckPM(bot, message) -> bool:
+    reply_to = message.reply_to_message
+    sendpm = bool(FORCE_PM)
+    if sendpm and message.chat.type != "private":
+        pmcheck = message_utils.sendPm(".", bot, message)
+        if pmcheck:
+            message_utils.deleteMessage(bot, pmcheck)
+        else:
+            FStart = message_utils.sendPMTxt(bot, message)
+            Thread(target=message_utils.auto_delete_message, args=(bot, message, FStart)).start()
+            if reply_to is not None:
+                    reply_to.delete()
+            return False
+    else:
+        return True        
+
+def Verify(listener, message, name:str, size:int, mega=None, clone=None) -> bool:
+    admins = bool(CheckAdmin(message, message.from_user.id))
+    BLACKLIST_TEXT="<b>Blacklisted Word Detected</b>\n\n<b>User: {}</b>(<code>{}</code>)\n\n<b>Name:</b> <code>{}</code>\n\n<b>Blacklist Word: {}</b>\n\n<b>Note: If You Think It's An Error, Tag @admin For Verification</b>\n<b>Only An Admin Can Add This Task.</b>\n\n#Report {}"
+    tag = f"<a href='tg://user?id={message.from_user.id}'>{message.from_user.first_name}</a>"
+    if admins:
+        LOGGER.info("Admin Detected")
+        return True
+    if BLACKLIST:
+        LOGGER.info('Checking Blacklist')
+        for bword in BLACKLIST:
+            bword = bword + ' '
+            if bword.lower() in name.lower():
+                LOGGER.info("Blacklisted Word Detected")
+                text = BLACKLIST_TEXT.format(tag, message.from_user.id, name, bword, message.chat.title)
+                msg = message_utils.sendMessage(text, bot, message)
+                if AUTO_DELETE_UPLOAD != -1 and message.chat.id not in WHITELIST and message.chat.type != 'private':
+                    Thread(target=message_utils.auto_delete_upload, args=(bot, message, msg)).start()    
+                return False
+
+    if any([ZIP_UNZIP_LIMIT, STORAGE_THRESHOLD, TORRENT_DIRECT_LIMIT, CLONE_LIMIT]):
+        arch = clone is None and any([listener.extract, listener.isZip, listener.isTar])
+        limit = None
+        if STORAGE_THRESHOLD is not None and clone is None:
+            acpt = check_storage_threshold(size, arch)
+            if not acpt:
+                msg1 = f'You must leave {STORAGE_THRESHOLD}GB free storage.'
+                msg1 += f'\nYour File/Folder size is {get_readable_file_size(size)}'
+                msg = message_utils.sendMessage(msg1, bot, message)
+                if AUTO_DELETE_UPLOAD != -1 and message.chat.id not in WHITELIST and message.chat.type != 'private':
+                    Thread(target=message_utils.auto_delete_upload, args=(bot, message, msg1)).start()
+                return False
+        if clone and CLONE_LIMIT is not None:
+            mssg = f'Failed, Clone limit is {CLONE_LIMIT}GB'
+            limit = CLONE_LIMIT    
+        elif ZIP_UNZIP_LIMIT is not None and arch:
+            mssg = f'Zip/Unzip limit is {ZIP_UNZIP_LIMIT}GB'
+            limit = ZIP_UNZIP_LIMIT
+        elif mega and MEGA_LIMIT is not None:
+            mssg = f'Failed, Mega limit is {MEGA_LIMIT}GB'
+            limit = MEGA_LIMIT
+        elif mega is None and clone is None and TORRENT_DIRECT_LIMIT is not None:
+            mssg = f'Torrent/Direct limit is {TORRENT_DIRECT_LIMIT}GB'
+            limit = TORRENT_DIRECT_LIMIT
+        if limit is not None:
+            LOGGER.info('Checking File/Folder Size...')
+            if size > limit * 1024**3:
+                msg2 = f'{mssg}.\nYour File/Folder size is {get_readable_file_size(size)}.'
+                msg = message_utils.sendMessage(msg2, bot, message)    
+                if AUTO_DELETE_UPLOAD != -1 and message.chat.id not in WHITELIST and message.chat.type != 'private':
+                    Thread(target=message_utils.auto_delete_upload, args=(bot, message, msg)).start()
+                return False
+    if not STOP_DUPLICATE or clone is None and listener.isLeech:
+        return True
+    LOGGER.info('Checking File/Folder if already in Drive...')
+    if clone is None:
+        if listener.isZip:
+            name += ".zip"
+        elif listener.isTar:
+            name += ".tar"
+        elif listener.extract:
+            try:
+                name = get_base_name(name)
+            except Exception:
+                pass
+    if name is not None:
+        gmsg, button = GoogleDriveHelper().drive_list(name, True)
+        if gmsg:
+            text = "File/Folder is already available in Drive.\nHere are the search results:"
+            msg = message_utils.sendMessage(text, bot, message, button)
+            if AUTO_DELETE_UPLOAD != -1 and message.chat.id not in WHITELIST and message.chat.type != 'private':
+                Thread(target=message_utils.auto_delete_upload, args=(bot, message, msg)).start()
+            return False         
+        
+def scbb(update, context):
     query = update.callback_query
-    stats = bot_sys_stats()
-    query.answer(text=stats, show_alert=True)
-def bot_sys_stats():
-    currentTime = get_readable_time(time() - botStartTime)
-    cpu = psutil.cpu_percent()
-    mem = psutil.virtual_memory().percent
-    disk = psutil.disk_usage(DOWNLOAD_DIR).percent
-    total, used, free = shutil.disk_usage(DOWNLOAD_DIR)
-    total = get_readable_file_size(total)
-    used = get_readable_file_size(used)
-    free = get_readable_file_size(free)
-    recv = get_readable_file_size(psutil.net_io_counters().bytes_recv)
-    sent = get_readable_file_size(psutil.net_io_counters().bytes_sent)
-    num_active = 0
-    num_upload = 0
-    num_split = 0
-    num_extract = 0
-    num_archi = 0
-    tasks = len(download_dict)
-    for stats in list(download_dict.values()):
-       if stats.status() == MirrorStatus.STATUS_DOWNLOADING:
-                num_active += 1
-       if stats.status() == MirrorStatus.STATUS_UPLOADING:
-                num_upload += 1
-       if stats.status() == MirrorStatus.STATUS_ARCHIVING:
-                num_archi += 1
-       if stats.status() == MirrorStatus.STATUS_EXTRACTING:
-                num_extract += 1
-       if stats.status() == MirrorStatus.STATUS_SPLITTING:
-                num_split += 1
-    stats = f"Bot Statistics"
-    stats += f"""
+    chat = update.effective_chat
+    admin = chat.get_member(query.from_user.id).status in ["creator", "administrator"] or query.from_user.id in [OWNER_ID] or int(query.from_user.id) in SUDO_USERS
+    data = query.data
+    data = data.split(' ')
+    if data[1] == "refresh":
+        try:
+            if KEYWORD is not None:
+                query.edit_message_caption(caption="Refreshing Status...⏳")
+            else:     
+                query.edit_message_text(text="Refreshing Status...⏳")
+            message_utils.update_all_messages()
+            query.answer(text="Refreshed", show_alert=False)
+        except Exception:
+            query.answer(text="Query Too Old", show_alert=False)
+            query.message.delete()
+    elif data[1] == "close":
+        if admin:
+            query.answer(text="Closed", show_alert=False)
+            message_utils.delete_all_messages()
+        else:
+            qmsg = f"{query.from_user.first_name} I Am Bound To Work For Admins Only"
+            query.answer(text=qmsg, show_alert=True)    
+                        
 
-Bot Uptime: {currentTime}
-T-DN: {recv} | T-UP: {sent}
-CPU: {cpu}% | RAM: {mem}%
-Disk: {total} | Free: {free}
-Used: {used} [{disk}%]
+dispatcher.add_handler(CallbackQueryHandler(scbb, pattern='ex', run_async=True))
 
-Thanks For Staying Here.
-"""
-    return stats
-dispatcher.add_handler(
-    CallbackQueryHandler(pop_up_stats, pattern="^" + str(THREE) + "$")
-)
+# Workaround for circular imports
+from bot.helper.mirror_utils.upload_utils.gdriveTools import GoogleDriveHelper
