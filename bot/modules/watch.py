@@ -147,7 +147,7 @@ def _watch(bot, message, isZip=False, isLeech=False, multi=0):
         buttons.sbutton("Cancel", f"qu {msg_id} cancel")
         YTBUTTONS = InlineKeyboardMarkup(buttons.build_menu(2))
         listener_dict[msg_id] = [listener, user_id, link, name, YTBUTTONS, args, formats_dict]
-        bmsg = sendMarkup('Choose Video Quality:', bot, message, YTBUTTONS)
+        bmsg = sendMarkup('Hey! Now you have 120 seconds to Select the Quality of Audio/Video. Else your task will get Cancelled.', bot, message, YTBUTTONS)
 
     Thread(target=_auto_cancel, args=(bmsg, msg_id)).start()
     if multi > 1:
