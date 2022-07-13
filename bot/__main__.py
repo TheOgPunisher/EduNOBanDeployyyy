@@ -7,25 +7,37 @@ from sys import executable
 from telegram import InlineKeyboardMarkup
 from telegram.ext import CommandHandler
 
-from bot import bot, dispatcher, updater, botStartTime, IGNORE_PENDING_REQUESTS, LOGGER, Interval, INCOMPLETE_TASK_NOTIFIER, DB_URI, alive, app, main_loop
-from .helper.ext_utils.fs_utils import start_cleanup, clean_all, exit_clean_up
-from .helper.ext_utils.telegraph_helper import telegraph
-from .helper.ext_utils.bot_utils import get_readable_file_size, get_readable_time
-from .helper.ext_utils.db_handler import DbManger
-from .helper.telegram_helper.bot_commands import BotCommands
-from .helper.telegram_helper.message_utils import sendMessage, sendMarkup, editMessage, sendLogFile
-from .helper.telegram_helper.filters import CustomFilters
-from .helper.telegram_helper.button_build import ButtonMaker
+from psutil import (boot_time, cpu_count, cpu_percent, disk_usage,
+                    net_io_counters, swap_memory, virtual_memory)
+from telegram import InlineKeyboardMarkup
+from telegram.error import Unauthorized
+from telegram.ext import CommandHandler
 
-from .modules import authorize, list, cancel_mirror, mirror_status, mirror, clone, watch, shell, eval, delete, count, leech_settings, search, rss
+from bot import (CHAT_NAME, DB_URI, FORCE_PM, GROUP, IGNORE_PENDING_REQUESTS,
+                 INCOMPLETE_TASK_NOTIFIER, KEYWORD, LOGGER, OWNER_ID, Interval,
+                 alive, app, bot, botStartTime, dispatcher, main_loop, updater)
+from bot.helper.telegram_helper.callbacks import Callback
+
+from .helper.ext_utils.bot_utils import (get_readable_file_size,
+                                         get_readable_time)
+from .helper.ext_utils.db_handler import DbManger
+from .helper.ext_utils.fs_utils import clean_all, exit_clean_up, start_cleanup
+from .helper.ext_utils.telegraph_helper import telegraph
+from .helper.telegram_helper.bot_commands import BotCommands
+from .helper.telegram_helper.button_build import ButtonMaker
+from .helper.telegram_helper.filters import CustomFilters
+from .helper.telegram_helper.message_utils import (auto_delete_message,
+                                                   editMessage, sendInfo,
+                                                   sendLogFile, sendMessage,
+                                                   sendPhoto)
+from .modules import (authorize, callback, cancel_mirror, clone, count, delete,
+                      eval, handlers, heroku, leech_settings, list, mirror,
+                      mirror_status, search, shell, watch)
 
 
 def stats(update, context):
-    if ospath.exists('.git'):
-        last_commit = check_output(["git log -1 --date=short --pretty=format:'%cd <b>From</b> %cr'"], shell=True).decode()
-    else:
-        last_commit = 'No UPSTREAM_REPO'
     currentTime = get_readable_time(time() - botStartTime)
+    osUptime = get_readable_time(time() - boot_time())
     total, used, free, disk= disk_usage('/')
     total = get_readable_file_size(total)
     used = get_readable_file_size(used)
@@ -33,53 +45,62 @@ def stats(update, context):
     sent = get_readable_file_size(net_io_counters().bytes_sent)
     recv = get_readable_file_size(net_io_counters().bytes_recv)
     cpuUsage = cpu_percent(interval=0.5)
+    p_core = cpu_count(logical=False)
+    t_core = cpu_count(logical=True)
+    swap = swap_memory()
+    swap_p = swap.percent
+    swap_t = get_readable_file_size(swap.total)
     memory = virtual_memory()
     mem_p = memory.percent
     mem_t = get_readable_file_size(memory.total)
     mem_a = get_readable_file_size(memory.available)
     mem_u = get_readable_file_size(memory.used)
-    stats = f'<b>Commit Date:</b> {last_commit}\n\n'\
-            f'<b>Bot Uptime:</b> {currentTime}\n\n'\
+    stats = f'<b><i><u>Bot OF {CHAT_NAME}</u></i></b>\n\n'\
+            f'<b>Bot Uptime:</b> {currentTime}\n'\
+            f'<b>OS Uptime:</b> {osUptime}\n\n'\
             f'<b>Total Disk Space:</b> {total}\n'\
             f'<b>Used:</b> {used} | <b>Free:</b> {free}\n\n'\
-            f'<b>Up:</b> {sent} | '\
-            f'<b>Down:</b> {recv}\n\n'\
-            f'<b>CPU:</b> {cpuUsage}% | '\
-            f'<b>RAM:</b> {mem_p}% | '\
+            f'<b>Upload:</b> {sent}\n'\
+            f'<b>Download:</b> {recv}\n\n'\
+            f'<b>CPU:</b> {cpuUsage}%\n'\
+            f'<b>RAM:</b> {mem_p}%\n'\
             f'<b>DISK:</b> {disk}%\n\n'\
-            f'<b>Total Memory:</b> {mem_t}\n'\
-            f'<b>Free:</b> {mem_a} | '\
-            f'<b>Used:</b> {mem_u}\n\n'
-    sendMessage(stats, context.bot, update.message)
-
-
-def start(update, context):
-    buttons = ButtonMaker()
-    buttons.buildbutton("Repo", "https://github.com/arshsisodiya/helios-mirror")
-    buttons.buildbutton("Support Group", "https://t.me/mirrorsociety")
-    reply_markup = InlineKeyboardMarkup(buttons.build_menu(2))
-    if CustomFilters.authorized_user(update) or CustomFilters.authorized_chat(update):
-        start_string = f'''
-This bot can mirror all your links to Google Drive!
-Type /{BotCommands.HelpCommand} to get a list of available commands
-'''
-        sendMarkup(start_string, context.bot, update.message, reply_markup)
+            f'<b>Physical Cores:</b> {p_core}\n'\
+            f'<b>Total Cores:</b> {t_core}\n\n'\
+            f'<b>SWAP:</b> {swap_t} | <b>Used:</b> {swap_p}%\n'\
+            f'<b>Memory Total:</b> {mem_t}\n'\
+            f'<b>Memory Free:</b> {mem_a}\n'\
+            f'<b>Memory Used:</b> {mem_u}\n'
+    if KEYWORD is not None:
+        smsg = sendPhoto(stats, context.bot, update.message)
     else:
-        sendMarkup('Not Authorized user, deploy your own mirror-leech bot', context.bot, update.message, reply_markup)
+        smsg = sendMessage(stats, context.bot, update.message)
+    Thread(target=auto_delete_message, args=(bot, update.message, smsg)).start()  
 
-def start(update, context):
+
+def start(update, context) -> None:
+    smsg = sendPhoto if KEYWORD is not None else sendMessage
     buttons = ButtonMaker()
-    buttons.buildbutton("Repo", "https://www.github.com/anasty17/mirror-leech-telegram-bot")
-    buttons.buildbutton("Owner", "https://www.github.com/anasty17")
+    buttons.buildbutton("Join Channel", f"{Callback.fsublink}")
     reply_markup = InlineKeyboardMarkup(buttons.build_menu(2))
-    if CustomFilters.authorized_user(update) or CustomFilters.authorized_chat(update):
-        start_string = f'''
-This bot can mirror all your links to Google Drive or to telegram!
-Type /{BotCommands.HelpCommand} to get a list of available commands
-'''
-        sendMarkup(start_string, context.bot, update.message, reply_markup)
+    tag = f"<a href='tg://user?id={update.message.from_user.id}'>{update.message.from_user.first_name}</a>"
+    if CustomFilters.authorized_user(update) or CustomFilters.authorized_chat(update) or CustomFilters.owner_filter(update):
+        if update.message.chat.type == "private":
+            msg = f"<b>Hey {tag}</b>"
+            msg+="\n\n<b>This Bot Can Mirror & Leech All Your Links To Google Drive And Telegram</b>"
+            smsg(msg, context.bot, update.message,reply_markup=reply_markup)
     else:
-        sendMarkup('Not an Authorized user, deploy your own mirror-leech bot', context.bot, update.message, reply_markup)
+        uid= f"{update.message.from_user.id}"
+        msg = f"<b>Hey {tag},</b>\n\n<b>If You Want To Use Me, You Have To Join The Channel & Group</b>"
+        if FORCE_PM:
+            msg+= "\n\n<b>NOTE :</b> <code>All The Uploaded Links And Files Will Be Sent Here In Your Private Chat</code>"
+
+        smsg(msg, context.bot, update.message,reply_markup=reply_markup)
+        capture = f"<b>New User Started The Bot</b>\n\n<b>Name: {tag}</b>\n\n<b>User ID: {uid}</b>"
+        try: 
+            sendInfo(capture, context.bot, update.message)
+        except Unauthorized:
+            LOGGER.warning("Bot isn't able to send message in that chat")
 
 def restart(update, context):
     restart_message = sendMessage("Restarting...", context.bot, update.message)
@@ -205,6 +226,7 @@ def bot_help(update, context):
     sendMarkup(help_string, context.bot, update.message, reply_markup)
 
 def main():
+    bot.set_my_commands(handlers.botcmds)
     start_cleanup()
     if INCOMPLETE_TASK_NOTIFIER and DB_URI is not None:
         notifier_dict = DbManger().get_incomplete_tasks()
@@ -213,9 +235,9 @@ def main():
                 if ospath.isfile(".restartmsg"):
                     with open(".restartmsg") as f:
                         chat_id, msg_id = map(int, f)
-                    msg = 'Bot has Been Restarted successfully!'
+                    msg = f'<b>Restarted successfully!</b>'
                 else:
-                    msg = 'The Bot has Successfully Restarted!'
+                    msg = f'<b>Bot Restarted!</b>'
                 for tag, links in data.items():
                      msg += f"\n\n{tag}: "
                      for index, link in enumerate(links, start=1):
@@ -225,19 +247,39 @@ def main():
                                  bot.editMessageText(msg, chat_id, msg_id, parse_mode='HTMl', disable_web_page_preview=True)
                                  osremove(".restartmsg")
                              else:
-                                 bot.sendMessage(cid, msg, 'HTML')
+                                 try:
+                                     bot.sendMessage(cid, msg, 'HTML')
+                                 except Exception as e:
+                                     LOGGER.error(e)
                              msg = ''
                 if 'Restarted successfully!' in msg and cid == chat_id:
                      bot.editMessageText(msg, chat_id, msg_id, parse_mode='HTMl', disable_web_page_preview=True)
                      osremove(".restartmsg")
                 else:
-                    bot.sendMessage(cid, msg, 'HTML')
+                    try:
+                        bot.sendMessage(cid, msg, 'HTML')
+                    except Exception as e:
+                        LOGGER.error(e)
 
     if ospath.isfile(".restartmsg"):
         with open(".restartmsg") as f:
             chat_id, msg_id = map(int, f)
-        bot.edit_message_text("The Bot has Been Restarted successfully!", chat_id, msg_id)
+        bot.edit_message_text("Restarted successfully!", chat_id, msg_id)
         osremove(".restartmsg")
+
+    if GROUP:
+        try:
+            app.resolve_peer(GROUP)
+            LOGGER.info(app.get_chat(GROUP).title)
+            LOGGER.info("Dump Started")
+        except Exception as e:
+            LOGGER.warning(f"Peer Failed: {e}")    
+    
+    if OWNER_ID:
+        try:
+          bot.sendMessage(OWNER_ID, f'<b>Bot Restarted!</b>', parse_mode='HTMl')       
+        except Exception as e:
+            LOGGER.error(str(e) + " Owner is Gey")          
 
     start_handler = CommandHandler(BotCommands.StartCommand, start, run_async=True)
     ping_handler = CommandHandler(BotCommands.PingCommand, ping,
@@ -258,8 +300,9 @@ def main():
     updater.start_polling(drop_pending_updates=IGNORE_PENDING_REQUESTS)
     LOGGER.info("Bot Started!")
     signal(SIGINT, exit_clean_up)
+    
+app.start()
 
 main()
-app.start()
 
 main_loop.run_forever()
